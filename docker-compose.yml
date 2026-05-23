@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Node.js REST API (System Under Test)
+  # ============================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    container_name: jwt-rbac-api
+    ports:
+      - "8081:8080"
+    environment:
+      - DB_HOST=mongodb
+      - DB_PORT=27017
+      - DB_NAME=bezkoder_db
+      - NODE_ENV=development
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ============================================
+  # MongoDB Database
+  # ============================================
+  mongodb:
+    image: mongo:6.0
+    container_name: jwt-rbac-mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongo-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

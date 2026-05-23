@@ -1,0 +1,78 @@
+name: Continuous Integration - API Test Automation
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 0 * * *' # Run nightly
+
+jobs:
+  test:
+    name: Build & Run Integration Suite
+    runs-on: ubuntu-latest
+
+    services:
+      # We don't spin up services here since we orchestrate them
+      # via Docker Compose inside the steps for exact replication of the dev environment.
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: TypeScript Compile & Verification
+        run: npx tsc --noEmit
+
+      - name: Build and Start SUT Containers (Docker Compose)
+        run: |
+          npm run docker:up
+          # Verify container states
+          docker compose ps
+
+      - name: Wait for API and Database Health
+        run: |
+          # Wait up to 60s for healthcheck status
+          for i in {1..30}; do
+            if curl -s -f http://localhost:8081/api/test/all > /dev/null; then
+              echo "✅ SUT API is healthy and accepting connections!"
+              exit 0
+            fi
+            echo "⏳ Waiting for SUT..."
+            sleep 2
+          done
+          echo "❌ SUT healthcheck timeout"
+          docker compose logs app
+          exit 1
+
+      - name: Seed Database Baseline
+        run: npm run test:setup
+
+      - name: Execute Automated Test Suite (Playwright)
+        run: npm test
+        env:
+          BASE_URL: http://localhost:8081/api
+          MONGODB_URI: mongodb://localhost:27018/bezkoder_db
+
+      - name: Stop and Clean Containers
+        if: always()
+        run: npm run docker:down
+
+      - name: Upload Test Execution Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
